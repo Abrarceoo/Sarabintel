@@ -167,10 +167,29 @@ class CostAgent:
         self._is_peak = obs["is_peak"]
 
         if obs["zone_type"] == "critical":
-          
-            hard_limit = obs["required_temp"]
-        else:
-            hard_limit = COMFORT_NORMAL_HARD_LIMIT
+            # لا يوجد "حد أقصى" يمكن الاقتراب منه هنا كما في المناطق العادية؛
+            # الدرجة المطلوبة قيمة ثابتة لا سقف مرن، فأي طرح أقل منها يعني
+            # تبريدًا إضافيًا (طاقة أكثر لا أقل). وكيل التكلفة لا يملك أي
+            # مساومة حقيقية في منطقة حرجة، فيقترح الدرجة المطلوبة نفسها
+            # دون اعتراض بدل صيغة (hard_limit - safety_margin) المخصّصة
+            # أصلاً للمناطق العادية ذات السقف المرن.
+            required = obs["required_temp"]
+            justification = (
+                "الساعة {} - منطقة حرجة، لا مجال لتخفيض التكلفة على حساب درجة "
+                "الحرارة الثابتة المطلوبة ({:.1f}°)، فلا يقترح وكيل التكلفة أي "
+                "انحراف عنها"
+            ).format(obs["hour"], required)
+            return {
+                "agent": self.name,
+                "zone": self.zone_id,
+                "domain": "ac_setpoint",
+                "value": required,
+                "justification": justification,
+                "flexibility_margin": 0.0,
+                "context": {"is_peak": obs["is_peak"], "price_per_kwh": obs["price_per_kwh"]},
+            }
+
+        hard_limit = COMFORT_NORMAL_HARD_LIMIT
 
         if obs["is_peak"]:
             safety_margin = COST_PEAK_SAFETY_MARGIN
