@@ -1,12 +1,29 @@
 # -*- coding: utf-8 -*-
 """
+سراب - المرحلة الثانية: بيئة المحاكاة (التوأم الرقمي)
 
+هذا الملف لا يعيد كتابة الوكلاء أو المنسّق من المرحلة الأولى، بل يستخدمهما
+كما هما (agents.py و coordinator.py) ويبني حولهما بيئة محاكاة كاملة:
+مبنى بعدة مناطق، نموذج حراري بسيط، مولّد إشغال واقعي، وبيانات خارجية
+(تعرفة كهرباء + حرارة خارجية). ثم يشغّل سيناريوهين على نفس "التوأم الرقمي"
+وبنفس البذرة العشوائية (seed=42) حتى يكون الفرق بينهما ناتجًا عن طريقة
+التحكم فقط، لا عن اختلاف الظروف:
+
+  1) baseline: جدول تحكم ثابت (الطريقة التقليدية المستخدمة في المباني اليوم)
+  2) sarab   : وكلاء ومنسّق المرحلة الأولى يتفاوضون كل ساعة
+
+كل الأرقام الناتجة هنا هي "تقدير محاكاة" (simulation-estimated) وليست
+قياسًا فعليًا من مبنى حقيقي.
 """
 
 import csv
 import math
 import random
 import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent
+DATA_DIR = REPO_ROOT / "data"
 
 from agents import ACAgent, LightingAgent, CostAgent, ComfortAgent
 from coordinator import Coordinator
@@ -136,7 +153,9 @@ def occupancy_probability(pattern, hour, day_index):
 
 
 def generate_environment(seed, total_hours, zones):
-    
+    """يبني بيئة المحاكاة مرة واحدة فقط: نفس الإشغال ونفس الطقس يُستخدمان لاحقًا
+    في كلا السيناريوهين (baseline و sarab) لضمان أن الفرق بينهما ناتج عن
+    طريقة التحكم فقط."""
     rng = random.Random(seed)
 
     num_days = total_hours // 24 + 1
@@ -373,10 +392,12 @@ def main():
     )
 
     all_rows = baseline_rows + sarab_rows
-    write_csv(all_rows, "simulation_log.csv")
+    DATA_DIR.mkdir(exist_ok=True)
+    log_path = DATA_DIR / "simulation_log.csv"
+    write_csv(all_rows, str(log_path))
 
     print_report(baseline_summary, sarab_summary)
-    print("السجل الساعي الكامل [{}] محفوظ في simulation_log.csv".format(DATA_LABEL))
+    print("السجل الساعي الكامل [{}] محفوظ في {}".format(DATA_LABEL, log_path))
 
 
 if __name__ == "__main__":
