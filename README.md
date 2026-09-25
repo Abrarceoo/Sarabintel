@@ -6,7 +6,7 @@ Impact Festival 2026 submission.
 ## Repo structure
 
 ```
-sarab/
+sarabintel/
 ├── agents.py              # the four agents (AC, Lighting, Cost, Comfort)
 ├── coordinator.py         # negotiation engine
 ├── simulation.py          # digital-twin simulation, baseline vs. Sarab
@@ -27,9 +27,6 @@ sarab/
 └── .gitignore
 ```
 
-`agents.py`, `coordinator.py`, and `simulation.py` stay at the repo root
-(not nested under `src/`) to match what's already described in the project's
-master document — one less place for the repo and the docs to disagree.
 
 ## Setup
 
@@ -48,25 +45,8 @@ python3 ml/train_model.py          # -> models/occupancy_model.{onnx,xml,bin}
 python3 tests/test_pipeline.py     # must print "ALL CHECKS PASSED"
 ```
 
-Every script resolves its own paths from its own file location (not the
-current directory you happen to be standing in), so these also work run
-individually from inside their own folder, e.g. `cd ml && python3 predictor.py`.
-
-## Two real bugs found and fixed while building the ML layer
-
-1. **skl2onnx's default classifier export uses ops OpenVINO can't read**
-   (`ai.onnx.ml.LinearClassifier`/`ZipMap`). `train_model.py` builds the ONNX
-   graph by hand instead, using only core ops (`Gemm` + `Sigmoid`) — exact,
-   not an approximation, since logistic regression is just `sigmoid(X·Wᵀ+b)`.
-2. **The OpenVINO CPU plugin silently defaults to bfloat16 internal
-   execution** for speed, even on an FP32 IR model — confirmed via
-   `core.get_property('CPU', ov.properties.hint.inference_precision)`. This
-   was shifting predicted probabilities by ~0.001. `predictor.py` explicitly
-   forces FP32 inference precision to stay faithful to what was trained.
-
 Current honest model quality (held-out test data): accuracy 0.885, precision
-0.812, recall 0.591, F1 0.684. Recall is the weakest — worth a rehearsed
-answer, not something to hide.
+0.812, recall 0.591, F1 0.684. Recall is the weakest.
 
 ## Not done yet
 
