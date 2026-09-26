@@ -40,11 +40,12 @@ def test_simulation_numbers():
     out = result.stdout
     check("simulation.py runs without error", result.returncode == 0)
     check("baseline energy is 1629.90 kWh", "1629.90" in out)
-    check("sarab energy is 1476.30 kWh", "1476.30" in out)
-    check("savings is 9.4%", "9.4%" in out)
+    check("sarab energy is ~1475.3 kWh (post-Phase-4)", "1475.31" in out)
+    check("energy savings is 9.5%", "9.5%" in out)
+    check("cost savings is 11.8% (higher than energy - the honest metric for this mechanism)", "11.8%" in out)
     check("zero hard-constraint violations", "sarab   : 0" in out)
-    check("CostAgent win count reflects the fix (144)", "CostAgent     : 144" in out)
-    check("ComfortAgent win count reflects the fix (129)", "ComfortAgent  : 129" in out)
+    check("CostAgent win count reflects Phase 4 (162)", "CostAgent     : 162" in out)
+    check("ComfortAgent win count reflects Phase 4 (138)", "ComfortAgent  : 138" in out)
 
 
 def test_predictor_matches_sklearn(tolerance=1e-4, n_samples=50):
@@ -94,6 +95,44 @@ def test_predictor_input_validation():
         check("rejects unknown zone pattern", True)
 
 
+def test_precooling_behavior():
+    sys.path.insert(0, str(REPO_ROOT))
+    from agents import ACAgent, AC_IDEAL_TEMP_OCCUPIED, AC_BASE_MARGIN, AC_PRECOOL_MARGIN
+
+    ac = ACAgent("test_zone")
+
+    occupied_now = ac.propose({"temperature": 26.0, "occupancy": True, "predicted_occupancy": False})
+    check("occupied-now proposal targets the occupied ideal", occupied_now["value"] == AC_IDEAL_TEMP_OCCUPIED)
+    check("occupied-now proposal uses the tight base margin", occupied_now["flexibility_margin"] == AC_BASE_MARGIN)
+
+    precool = ac.propose({"temperature": 26.0, "occupancy": False, "predicted_occupancy": True})
+    check("pre-cool proposal targets the same occupied ideal", precool["value"] == AC_IDEAL_TEMP_OCCUPIED)
+    check("pre-cool proposal uses the wider, more yielding margin", precool["flexibility_margin"] == AC_PRECOOL_MARGIN)
+    check("pre-cool margin is looser than the confirmed-occupied margin",
+          AC_PRECOOL_MARGIN > AC_BASE_MARGIN)
+
+    idle = ac.propose({"temperature": 26.0, "occupancy": False, "predicted_occupancy": False})
+    check("no signal at all -> agent just tracks current temperature (no needless cooling)",
+          idle["value"] == 26.0)
+
+
+def test_quantized_model_accuracy_matches_fp32():
+    sys.path.insert(0, str(REPO_ROOT / "ml"))
+    from quantize_and_benchmark import compare_accuracy, MODELS_DIR
+
+    int8_path = MODELS_DIR / "occupancy_model_int8.xml"
+    if not int8_path.exists():
+        check("INT8 model exists (run ml/quantize_and_benchmark.py first)", False)
+        return
+
+    fp32_metrics, int8_metrics = compare_accuracy(MODELS_DIR / "occupancy_model.xml", int8_path)
+    check(
+        "INT8 quantization didn't silently degrade accuracy vs FP32",
+        abs(fp32_metrics["accuracy"] - int8_metrics["accuracy"]) < 0.02,
+        "FP32={:.3f} INT8={:.3f}".format(fp32_metrics["accuracy"], int8_metrics["accuracy"]),
+    )
+
+
 if __name__ == "__main__":
     print("=== 1. simulation.py regression ===")
     test_simulation_numbers()
@@ -101,6 +140,10 @@ if __name__ == "__main__":
     test_predictor_matches_sklearn()
     print("\n=== 3. Predictor input validation ===")
     test_predictor_input_validation()
+    print("\n=== 4. ACAgent pre-cooling behavior ===")
+    test_precooling_behavior()
+    print("\n=== 5. INT8 quantization sanity ===")
+    test_quantized_model_accuracy_matches_fp32()
 
     print()
     if FAILURES:

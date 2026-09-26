@@ -248,13 +248,21 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
     if controller == "sarab":
         try:
             predictor = OccupancyPredictor()
-        except Exception as exc:
-            raise RuntimeError(
-                "تعذّر تحميل نموذج توقّع الإشغال. شغّل أولاً:\n"
-                "  python3 ml/build_training_data.py\n"
-                "  python3 ml/train_model.py\n"
-                "قبل تشغيل simulation.py."
-            ) from exc
+        except Exception:
+            # لا يوجد نموذج مُدرَّب بعد (أول تشغيل على نسخة نظيفة تمامًا من
+            # المستودع، قبل تنفيذ خط أنابيب التعلم الآلي). بدلاً من التوقف
+            # بخطأ، نكمل في وضع تفاعلي بحت (predicted_occupancy = False
+            # دائمًا) - هذا يسمح لهذا التشغيل نفسه بإنتاج simulation_log.csv
+            # الذي يحتاجه build_training_data.py لتدريب النموذج أول مرة.
+            # بعد تدريب النموذج، أعد تشغيل simulation.py للحصول على السلوك
+            # الاستباقي الكامل.
+            print(
+                "تنبيه: لم يُعثر على نموذج توقّع مُدرَّب - المتابعة في وضع "
+                "تفاعلي بحت لهذه الجولة. شغّل ml/build_training_data.py ثم "
+                "ml/train_model.py، ثم أعد تشغيل simulation.py للحصول على "
+                "التبريد الاستباقي.",
+                file=sys.stderr,
+            )
 
     for h in range(total_hours):
         hour = h % 24
@@ -274,10 +282,13 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
                 # هناك "تسريب" لمعلومة من المستقبل لم تتوفر بعد فعليًا لحظة
                 # اتخاذ القرار.
                 prev_occupied = occupancy[h - 1][zid] if h > 0 else 0
-                predicted_occupancy = predictor.predict(
-                    hour=hour, is_weekend=int(is_weekend(day)),
-                    pattern=z["pattern"], prev_occupied=int(prev_occupied),
-                )
+                if predictor is not None:
+                    predicted_occupancy = predictor.predict(
+                        hour=hour, is_weekend=int(is_weekend(day)),
+                        pattern=z["pattern"], prev_occupied=int(prev_occupied),
+                    )
+                else:
+                    predicted_occupancy = False
 
                 # كل منطقة تتفاوض بمعزل تام عن غيرها (منسّق مستقل لكل منطقة)
                 state = {
