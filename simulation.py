@@ -28,6 +28,9 @@ DATA_DIR = REPO_ROOT / "data"
 from agents import ACAgent, LightingAgent, CostAgent, ComfortAgent
 from coordinator import Coordinator
 
+sys.path.insert(0, str(REPO_ROOT / "ml"))
+from predictor import OccupancyPredictor  # noqa: E402
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -234,11 +237,24 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
 
     rows = []
     total_kwh = 0.0
+    total_cost = 0.0
     decisions_count = 0
     win_counts = {}
     violations = 0
 
     coordinators = build_coordinators_per_zone(zones) if controller == "sarab" else None
+
+    predictor = None
+    if controller == "sarab":
+        try:
+            predictor = OccupancyPredictor()
+        except Exception as exc:
+            raise RuntimeError(
+                "تعذّر تحميل نموذج توقّع الإشغال. شغّل أولاً:\n"
+                "  python3 ml/build_training_data.py\n"
+                "  python3 ml/train_model.py\n"
+                "قبل تشغيل simulation.py."
+            ) from exc
 
     for h in range(total_hours):
         hour = h % 24
@@ -252,6 +268,17 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
             light_winner = None
 
             if controller == "sarab":
+                # توقّع الإشغال يعتمد فقط على معلومات معروفة عند بداية الساعة h:
+                # الساعة نفسها، ونمط اليوم، وإشغال الساعة السابقة (h-1) - وليس
+                # إشغال الساعة الحالية h نفسها ولا أي ساعة لاحقة، حتى لا يكون
+                # هناك "تسريب" لمعلومة من المستقبل لم تتوفر بعد فعليًا لحظة
+                # اتخاذ القرار.
+                prev_occupied = occupancy[h - 1][zid] if h > 0 else 0
+                predicted_occupancy = predictor.predict(
+                    hour=hour, is_weekend=int(is_weekend(day)),
+                    pattern=z["pattern"], prev_occupied=int(prev_occupied),
+                )
+
                 # كل منطقة تتفاوض بمعزل تام عن غيرها (منسّق مستقل لكل منطقة)
                 state = {
                     "zones": {
@@ -261,6 +288,7 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
                             "natural_light": natural_light[h][zid],
                             "zone_type": z["zone_type"],
                             "required_temp": z.get("required_temp", 20.0),
+                            "predicted_occupancy": predicted_occupancy,
                         }
                     },
                     "price": {"is_peak": is_peak, "price_per_kwh": price, "hour": hour},
@@ -292,6 +320,7 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
             light_kwh = lighting_energy_kwh(z["size_m2"], lighting_level)
             hour_total_kwh = ac_kwh + light_kwh
             total_kwh += hour_total_kwh
+            total_cost += hour_total_kwh * price
 
             # فحص فعلي على نتيجة الحرارة بعد التحديث الفيزيائي، وليس فقط على
             # القيمة التي اختارها التفاوض - هذا يثبت أن الالتزام يصمد فعليًا
@@ -329,6 +358,7 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
     summary = {
         "scenario": name,
         "total_kwh": total_kwh,
+        "total_cost": total_cost,
         "decisions_count": decisions_count,
         "win_counts": win_counts,
         "violations": violations,
@@ -344,16 +374,26 @@ def print_report(baseline_summary, sarab_summary):
     s_kwh = sarab_summary["total_kwh"]
     diff_pct = ((b_kwh - s_kwh) / b_kwh * 100.0) if b_kwh else 0.0
 
+    b_cost = baseline_summary["total_cost"]
+    s_cost = sarab_summary["total_cost"]
+    cost_diff_pct = ((b_cost - s_cost) / b_cost * 100.0) if b_cost else 0.0
+
     print("=" * 72)
     print("تقرير محاكاة سرب - أسبوع كامل (٧ أيام) [{}]".format(DATA_LABEL))
     print("كل الأرقام أدناه تقدير من المحاكاة، وليست قياسًا فعليًا من مبنى حقيقي")
     print("=" * 72)
     print("النظام التقليدي (جدول ثابت):")
     print("  إجمالي الطاقة (kWh) [{}]: {:.2f}".format(DATA_LABEL, b_kwh))
+    print("  إجمالي التكلفة       [{}]: {:.2f}".format(DATA_LABEL, b_cost))
     print()
     print("نظام سراب (وكلاء + تفاوض):")
     print("  إجمالي الطاقة (kWh) [{}]: {:.2f}".format(DATA_LABEL, s_kwh))
-    print("  نسبة الفرق مقارنة بالنظام التقليدي [{}]: {:.1f}%".format(DATA_LABEL, diff_pct))
+    print("  إجمالي التكلفة       [{}]: {:.2f}".format(DATA_LABEL, s_cost))
+    print("  نسبة توفير الطاقة   [{}]: {:.1f}%".format(DATA_LABEL, diff_pct))
+    print("  نسبة توفير التكلفة  [{}]: {:.1f}%".format(DATA_LABEL, cost_diff_pct))
+    print("  (توفير التكلفة أعلى من توفير الطاقة لأن آلية النظام تنقل الحمل")
+    print("   نحو الساعات الأرخص، لا تقلل الطاقة الكلية بالضرورة - وهذا")
+    print("   المقياس الصحيح لتقييم قيمة التبريد الاستباقي والتفاوض الموزون)")
     print("  عدد القرارات المستقلة عبر الأسبوع (تفاوض فعلي لكل ساعة/منطقة/مجال): {}".format(
         sarab_summary["decisions_count"]))
     print()

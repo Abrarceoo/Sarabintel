@@ -22,6 +22,7 @@
 # ---- ثوابت وكيل التكييف ----
 AC_IDEAL_TEMP_OCCUPIED = 23.0   # الدرجة المثالية للراحة عند وجود إشغال
 AC_BASE_MARGIN = 1.0            # هامش مرونة أساسي مقبول دائمًا (بصرف النظر عن السعر)
+AC_PRECOOL_MARGIN = 2.0         # هامش أوسع للتبريد الاستباقي القائم على توقّع فقط
 AC_PEAK_CONCESSION_LIMIT = 3.0  # أقصى تنازل يقبل وكيل التكييف تقييمه إيجابيًا وقت الذروة
 AC_UNOCCUPIED_MARGIN = 15.0     #
 
@@ -50,10 +51,13 @@ class ACAgent:
         return {
             "temperature": zone["temperature"],
             "occupancy": zone["occupancy"],
+            "predicted_occupancy": zone.get("predicted_occupancy", False),
         }
 
     def propose(self, obs):
         occupied = obs["occupancy"]
+        predicted = obs.get("predicted_occupancy", False)
+
         if occupied:
             ideal = AC_IDEAL_TEMP_OCCUPIED
             margin = AC_BASE_MARGIN
@@ -61,11 +65,24 @@ class ACAgent:
                 "المنطقة مشغولة ودرجة الحرارة الحالية {:.1f}° مئوية، "
                 "الهدف الوصول إلى {:.1f}° لراحة الشاغلين"
             ).format(obs["temperature"], ideal)
+        elif predicted:
+            # غير مشغولة الآن، لكن النموذج يتوقع إشغالها الساعة القادمة:
+            # نبدأ التبريد الاستباقي نحو نفس الهدف المريح، لكن بهامش أوسع
+            # (AC_PRECOOL_MARGIN) لأن هذا توقّع لا حقيقة مؤكدة - فيتنازل
+            # الوكيل بسهولة أكبر إن ضغط وكيل التكلفة أو الراحة عكس ذلك
+            ideal = AC_IDEAL_TEMP_OCCUPIED
+            margin = AC_PRECOOL_MARGIN
+            justification = (
+                "المنطقة غير مشغولة الآن، لكن يُتوقع إشغالها الساعة القادمة، "
+                "فيبدأ وكيل التكييف تبريدًا استباقيًا نحو {:.1f}° بدلاً من "
+                "الانتظار حتى يصل الشاغلون فعليًا (هامش أوسع لأنه توقّع لا "
+                "إشغال مؤكد)"
+            ).format(ideal)
         else:
             
             ideal = obs["temperature"]
             margin = AC_UNOCCUPIED_MARGIN
-            justification = "المنطقة غير مشغولة، لا حاجة ملحّة لضبط دقيق لدرجة الحرارة"
+            justification = "المنطقة غير مشغولة ولا يُتوقع إشغالها قريبًا، لا حاجة ملحّة لضبط دقيق لدرجة الحرارة"
 
        
         self._ideal = ideal
@@ -78,7 +95,7 @@ class ACAgent:
             "value": ideal,
             "justification": justification,
             "flexibility_margin": margin,
-            "context": {"occupancy": occupied},
+            "context": {"occupancy": occupied, "predicted_occupancy": predicted},
         }
 
     def evaluate(self, proposal):
