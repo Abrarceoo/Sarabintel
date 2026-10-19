@@ -360,7 +360,8 @@ class ComfortAgent:
                 "reason": "أي انحراف عن الدرجة المطلوبة مرفوض في المناطق الحرجة مهما كان السعر",
             }
 
-        hard_limit = COMFORT_NORMAL_HARD_LIMIT + (1.0 if relaxed else 0.0)
+        # The normal-zone maximum is a hard limit in every negotiation pass.
+        hard_limit = COMFORT_NORMAL_HARD_LIMIT
         if candidate > hard_limit:
             return {
                 "score": -1.0,

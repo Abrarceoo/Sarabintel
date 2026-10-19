@@ -339,7 +339,7 @@ def run_scenario(name, zones, total_hours, outdoor_temps, occupancy, natural_lig
                 if abs(next_temp - z["required_temp"]) > 0.5:
                     violations += 1
             else:
-                if next_temp > 27.0:
+                if next_temp > 26.0:
                     violations += 1
 
             rows.append({

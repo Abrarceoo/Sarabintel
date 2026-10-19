@@ -34,8 +34,12 @@ def check(name, condition, detail=""):
 
 def test_simulation_numbers():
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "simulation.py")],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
+    [sys.executable, str(REPO_ROOT / "simulation.py")],
+    capture_output=True,
+    text=True,
+    encoding="utf-8",
+    errors="replace",
+    cwd=str(REPO_ROOT),
     )
     out = result.stdout
     check("simulation.py runs without error", result.returncode == 0)
@@ -115,6 +119,32 @@ def test_precooling_behavior():
     check("no signal at all -> agent just tracks current temperature (no needless cooling)",
           idle["value"] == 26.0)
 
+def test_ordinary_comfort_limit_stays_hard_during_retry():
+    sys.path.insert(0, str(REPO_ROOT))
+    from agents import ComfortAgent
+
+    comfort = ComfortAgent("test_zone")
+
+    at_limit = comfort.evaluate({
+        "domain": "ac_setpoint",
+        "value": 26.0,
+        "context": {"relaxed": True},
+    })
+    above_limit = comfort.evaluate({
+        "domain": "ac_setpoint",
+        "value": 27.0,
+        "context": {"relaxed": True},
+    })
+
+    check(
+        "26 C remains feasible in the relaxed round",
+        not at_limit["hard_violation"],
+    )
+    check(
+        "27 C is a hard violation in the relaxed round",
+        above_limit["hard_violation"],
+    )
+
 
 def test_quantized_model_accuracy_matches_fp32():
     sys.path.insert(0, str(REPO_ROOT / "ml"))
@@ -142,7 +172,9 @@ if __name__ == "__main__":
     test_predictor_input_validation()
     print("\n=== 4. ACAgent pre-cooling behavior ===")
     test_precooling_behavior()
-    print("\n=== 5. INT8 quantization sanity ===")
+    print("\n=== 5. Ordinary-zone hard limit ===")
+    test_ordinary_comfort_limit_stays_hard_during_retry()
+    print("\n=== 6. INT8 quantization sanity ===")
     test_quantized_model_accuracy_matches_fp32()
 
     print()
